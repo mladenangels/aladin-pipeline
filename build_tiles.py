@@ -35,7 +35,11 @@ FORMAT_VERSION = 1
 
 # Parameter numbers in DHMZ's GRIB table 1.
 U_WIND, V_WIND = 33, 34
-U_GUST, V_GUST = 196, 197   # verified against Open-Meteo: magnitude matched at step 0
+# DHMZ confirmed by mail on 2026-09-16 that 196 and 197 are the components of the
+# maximum gust in the PRECEDING hour at 10 m. Open-Meteo defines wind_gusts_10m the
+# same way, so a gust labelled with hour H means the same thing in both and the two
+# series merge on the hour label with no shift.
+U_GUST, V_GUST = 196, 197
 
 # A coarse outline of the Adriatic, generous on the seaward side. It exists only to
 # keep us from writing eight hundred tiles of Bosnian hinterland; a tile that clips
