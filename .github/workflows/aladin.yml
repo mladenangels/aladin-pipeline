@@ -1,0 +1,76 @@
+name: Publish ALADIN wind tiles
+
+# DHMZ refreshes the nautical GRIB at about 02:50 and 14:50 UTC. We start twenty
+# minutes later; the run script compares the file's hash against the last one and
+# exits without publishing if nothing changed, so an early or late DHMZ run costs
+# a download and nothing else.
+on:
+  schedule:
+    - cron: "10 3 * * *"
+    - cron: "10 15 * * *"
+  workflow_dispatch:
+    inputs:
+      run:
+        description: "Model run to fetch (00 or 12)"
+        required: false
+        default: "00"
+
+concurrency:
+  group: aladin-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # The state file carries the hash of the GRIB we last published, so a rerun
+      # of an unchanged file is a no-op. Losing the cache costs one extra publish.
+      - name: Restore the last published hash
+        uses: actions/cache/restore@v4
+        with:
+          path: .aladin-state.json
+          key: aladin-state-${{ github.run_id }}
+          restore-keys: aladin-state-
+
+      - name: Pick the run
+        id: pick
+        run: |
+          if [ -n "${{ github.event.inputs.run }}" ]; then
+            echo "run=${{ github.event.inputs.run }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "10 15 * * *" ]; then
+            echo "run=12" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=00" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build tiles
+        id: build
+        env:
+          DHMZ_USER: ${{ secrets.DHMZ_USER }}
+          DHMZ_PASSWORD: ${{ secrets.DHMZ_PASSWORD }}
+          ALADIN_RUN: ${{ steps.pick.outputs.run }}
+        run: |
+          python3 run.py out
+          if [ -f out/manifest.json ]; then echo "built=yes" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Install lftp
+        if: steps.build.outputs.built == 'yes'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+
+      - name: Upload to designer2.org
+        if: steps.build.outputs.built == 'yes'
+        env:
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USER: ${{ secrets.FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: ./upload.sh out
+
+      - name: Save the published hash
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .aladin-state.json
+          key: aladin-state-${{ github.run_id }}
